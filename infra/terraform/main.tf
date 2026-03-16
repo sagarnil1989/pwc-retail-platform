@@ -221,41 +221,100 @@ resource "databricks_schema" "gold" {
 }
 
 # # ------------------------------------------------------------------
-# # Optional raw/checkpoints/artifacts external locations
-# # You can uncomment later once catalog is working
+# # Add the Silver pipeline resource
 # # ------------------------------------------------------------------
-# resource "databricks_external_location" "raw" {
-#   name            = "el-${var.project_name}-${var.environment}-raw"
-#   url             = "abfss://${azurerm_storage_data_lake_gen2_filesystem.datalake.name}@${azurerm_storage_account.adls.name}.dfs.core.windows.net/raw"
-#   credential_name = databricks_storage_credential.adls_sp.name
-#   comment         = "External location for raw landing files"
+resource "databricks_pipeline" "silver" {
+  name       = "pwc-retail-silver-tf"
+  catalog    = var.catalog_name
+  schema     = var.silver_schema_name
+  serverless = true
+  continuous = false
 
-#   depends_on = [
-#     databricks_storage_credential.adls_sp,
-#     azurerm_storage_data_lake_gen2_path.raw
-#   ]
-# }
+  library {
+    notebook {
+      path = local.silver_pipeline_path
+    }
+  }
 
-# resource "databricks_external_location" "checkpoints" {
-#   name            = "el-${var.project_name}-${var.environment}-checkpoints"
-#   url             = "abfss://${azurerm_storage_data_lake_gen2_filesystem.datalake.name}@${azurerm_storage_account.adls.name}.dfs.core.windows.net/checkpoints"
-#   credential_name = databricks_storage_credential.adls_sp.name
-#   comment         = "External location for checkpoints"
+  configuration = {
+    env     = var.environment
+    project = var.project_name
+  }
 
-#   depends_on = [
-#     databricks_storage_credential.adls_sp,
-#     azurerm_storage_data_lake_gen2_path.checkpoints
-#   ]
-# }
+  depends_on = [
+    databricks_catalog.retail,
+    databricks_schema.silver
+  ]
+}
 
-# resource "databricks_external_location" "artifacts" {
-#   name            = "el-${var.project_name}-${var.environment}-artifacts"
-#   url             = "abfss://${azurerm_storage_data_lake_gen2_filesystem.datalake.name}@${azurerm_storage_account.adls.name}.dfs.core.windows.net/artifacts"
-#   credential_name = databricks_storage_credential.adls_sp.name
-#   comment         = "External location for artifacts"
+# # ------------------------------------------------------------------
+# # This keeps your Bronze → Silver → Gold flow with minimal change.
+# # ------------------------------------------------------------------
+resource "databricks_job" "data_sync_pipeline" {
+  name = "Data Sync Pipeline Job TF "
 
-#   depends_on = [
-#     databricks_storage_credential.adls_sp,
-#     azurerm_storage_data_lake_gen2_path.artifacts
-#   ]
-# }
+  schedule {
+    quartz_cron_expression = "0 0 5 ? * MON-FRI"
+    timezone_id            = "Europe/Amsterdam"
+    pause_status           = "UNPAUSED"
+  }
+
+  task {
+    task_key = "Bronze"
+
+    notebook_task {
+      notebook_path = local.bronze_notebook_path
+      source        = "WORKSPACE"
+    }
+  }
+
+  task {
+    task_key = "Silver"
+
+    depends_on {
+      task_key = "Bronze"
+    }
+
+    pipeline_task {
+      pipeline_id  = databricks_pipeline.silver.id
+      full_refresh = false
+    }
+  }
+
+  task {
+    task_key = "Gold"
+
+    depends_on {
+      task_key = "Silver"
+    }
+
+    notebook_task {
+      notebook_path = local.gold_notebook_path
+      source        = "WORKSPACE"
+    }
+  }
+
+  tags = local.common_tags
+
+  depends_on = [
+    databricks_pipeline.silver
+  ]
+}
+
+resource "databricks_permissions" "job_permissions" {
+  job_id = databricks_job.data_sync_pipeline.id
+
+  access_control {
+    user_name        = var.databricks_principal
+    permission_level = "CAN_MANAGE"
+  }
+}
+
+resource "databricks_permissions" "pipeline_permissions" {
+  pipeline_id = databricks_pipeline.silver.id
+
+  access_control {
+    user_name        = var.databricks_principal
+    permission_level = "CAN_MANAGE"
+  }
+}
