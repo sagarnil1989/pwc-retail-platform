@@ -14,15 +14,15 @@ on:
       - ".github/workflows/azure-pipeline.yml"
 
 permissions:
-  id-token: write
   contents: read
 
 env:
   TF_WORKING_DIR: infra/terraform/
+  TF_INPUT: "0"
+  TF_IN_AUTOMATION: "true"
 
-  ARM_USE_OIDC: true
-  ARM_USE_AZUREAD: true
   ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
   ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
   ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
@@ -31,13 +31,16 @@ env:
   TF_VAR_client_id: ${{ vars.AZURE_CLIENT_ID }}
   TF_VAR_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
 
+  TF_VAR_bronze_schema_name: bronze
+  TF_VAR_silver_schema_name: silver
+  TF_VAR_gold_schema_name: gold
+
   TF_VAR_databricks_workspace_url: ${{ vars.DATABRICKS_WORKSPACE_URL }}
   TF_VAR_databricks_principal: ${{ vars.DATABRICKS_PRINCIPAL }}
   TF_VAR_databricks_pat: ${{ secrets.DATABRICKS_PAT }}
 
 jobs:
   terraform-plan:
-    name: Terraform Plan
     runs-on: ubuntu-latest
     environment: dev
 
@@ -45,20 +48,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Azure login with OIDC
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
 
       - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          terraform init 
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
+            -backend-config="key=${{ vars.TFSTATE_KEY }}"
 
       - name: Terraform Format Check
         working-directory: ${{ env.TF_WORKING_DIR }}
@@ -66,21 +68,21 @@ jobs:
 
       - name: Terraform Validate
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform validate
+        run: terraform validate -no-color
 
       - name: Terraform Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform plan -out=tfplan
+        run: |
+          terraform plan -input=false -no-color -out=tfplan
+          terraform show -no-color tfplan
 
       - name: Upload plan artifact
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: tfplan
           path: ${{ env.TF_WORKING_DIR }}/tfplan
 
   terraform-apply:
-    name: Terraform Apply
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: terraform-plan
     runs-on: ubuntu-latest
@@ -90,15 +92,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Azure login with OIDC
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
 
       - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
@@ -107,12 +104,7 @@ jobs:
             -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
             -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
             -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
-            -backend-config="key=${{ vars.TFSTATE_KEY }}" \
-            -backend-config="use_oidc=true" \
-            -backend-config="use_azuread_auth=true" \
-            -backend-config="tenant_id=${{ vars.AZURE_TENANT_ID }}" \
-            -backend-config="subscription_id=${{ vars.AZURE_SUBSCRIPTION_ID }}" \
-            -backend-config="client_id=${{ vars.AZURE_CLIENT_ID }}"
+            -backend-config="key=${{ vars.TFSTATE_KEY }}"
 
       - name: Download plan artifact
         uses: actions/download-artifact@v4
@@ -122,4 +114,4 @@ jobs:
 
       - name: Terraform Apply
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -input=false -no-color -auto-approve tfplan
