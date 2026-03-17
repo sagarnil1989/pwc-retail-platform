@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 env:
-  TF_WORKING_DIR: infra/terraform/env/dev
+  TF_WORKING_DIR: infra/terraform/
 
   ARM_USE_OIDC: true
   ARM_USE_AZUREAD: true
