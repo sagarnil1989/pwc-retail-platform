@@ -2,6 +2,8 @@
 from pyspark.sql.functions import current_timestamp, lit, col
 from typing import List, Dict
 
+from databricks.common.transforms import get_entity_config, get_snapshot_batch
+
 # --------------------------------------------------
 # Config
 # --------------------------------------------------
@@ -36,9 +38,6 @@ entity_configs = [
     }
 ]
 
-# --------------------------------------------------
-# Helper: recursively list files under landing
-# --------------------------------------------------
 def list_files_recursive(path: str) -> List[Dict]:
     results = []
     for item in dbutils.fs.ls(path):
@@ -51,31 +50,6 @@ def list_files_recursive(path: str) -> List[Dict]:
             })
     return results
 
-# --------------------------------------------------
-# Helper: identify entity from file name
-# --------------------------------------------------
-def get_entity_config(file_name: str, entity_configs: List[Dict]) -> Dict:
-    lower_name = file_name.lower()
-    for cfg in entity_configs:
-        if cfg["file_match_contains"] in lower_name:
-            return cfg
-    return None
-
-# --------------------------------------------------
-# Helper: extract batch folder from path
-# Example:
-# abfss://.../landing/day1/file.csv -> day1
-# --------------------------------------------------
-def get_snapshot_batch(file_path: str) -> str:
-    path_after_landing = file_path.split("/landing/")[-1]
-    path_parts = path_after_landing.split("/")
-    if len(path_parts) > 1:
-        return path_parts[0]
-    return "unknown"
-
-# --------------------------------------------------
-# Main logic
-# --------------------------------------------------
 all_files = list_files_recursive(landing_base_path)
 
 if not all_files:
@@ -94,12 +68,6 @@ for file_meta in all_files:
         continue
 
     try:
-        print(f"Checking file: {file_path}")
-
-        # --------------------------------------------------
-        # Check if this exact file path was already loaded
-        # Same filename in another folder = new file
-        # --------------------------------------------------
         already_loaded = False
 
         if spark.catalog.tableExists(cfg["target_table"]):
@@ -114,13 +82,8 @@ for file_meta in all_files:
             print(f"Skipping already loaded file path: {file_path}")
             continue
 
-        print(f"Processing file: {file_name} -> {cfg['target_table']}")
-
         snapshot_batch = get_snapshot_batch(file_path)
 
-        # --------------------------------------------------
-        # Read file
-        # --------------------------------------------------
         df = (
             spark.read
             .option("header", True)
@@ -132,9 +95,6 @@ for file_meta in all_files:
             .withColumn("entity_name", lit(cfg["entity"]))
         )
 
-        # --------------------------------------------------
-        # Write to bronze
-        # --------------------------------------------------
         if df.limit(1).count() > 0:
             (
                 df.write
@@ -143,7 +103,6 @@ for file_meta in all_files:
                 .option("mergeSchema", "true")
                 .saveAsTable(cfg["target_table"])
             )
-
             print(f"Loaded file into {cfg['target_table']}: {file_path}")
         else:
             print(f"File is empty, skipping load: {file_path}")
