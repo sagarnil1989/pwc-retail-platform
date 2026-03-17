@@ -1,0 +1,133 @@
+name: Terraform Deploy Azure + Databricks
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "infra/**"
+      - ".github/workflows/azure-pipeline.yml"
+  push:
+    branches: [ main ]
+    paths:
+      - "infra/**"
+      - ".github/workflows/azure-pipeline.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TF_WORKING_DIR: infra/terraform/env/dev
+
+  ARM_USE_OIDC: true
+  ARM_USE_AZUREAD: true
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+  TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+  TF_VAR_client_id: ${{ vars.AZURE_CLIENT_ID }}
+
+  TF_VAR_databricks_workspace_url: ${{ vars.DATABRICKS_WORKSPACE_URL }}
+  TF_VAR_databricks_principal: ${{ vars.DATABRICKS_PRINCIPAL }}
+  TF_VAR_databricks_pat: ${{ secrets.DATABRICKS_PAT }}
+
+jobs:
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
+            -backend-config="key=${{ vars.TFSTATE_KEY }}" \
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true" \
+            -backend-config="tenant_id=${{ vars.AZURE_TENANT_ID }}" \
+            -backend-config="subscription_id=${{ vars.AZURE_SUBSCRIPTION_ID }}" \
+            -backend-config="client_id=${{ vars.AZURE_CLIENT_ID }}"
+
+      - name: Terraform Format Check
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -out=tfplan
+
+      - name: Upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_WORKING_DIR }}/tfplan
+
+  terraform-apply:
+    name: Terraform Apply
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: terraform-plan
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
+            -backend-config="key=${{ vars.TFSTATE_KEY }}" \
+            -backend-config="use_oidc=true" \
+            -backend-config="use_azuread_auth=true" \
+            -backend-config="tenant_id=${{ vars.AZURE_TENANT_ID }}" \
+            -backend-config="subscription_id=${{ vars.AZURE_SUBSCRIPTION_ID }}" \
+            -backend-config="client_id=${{ vars.AZURE_CLIENT_ID }}"
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -auto-approve tfplan

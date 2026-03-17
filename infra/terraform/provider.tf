@@ -19,21 +19,21 @@ terraform {
   }
 
   backend "azurerm" {
-    resource_group_name  = "rg-tf-state"
-    storage_account_name = "stterraformstatepwc"
-    container_name       = "tfstate"
-    key                  = "pwc-retail-dev.tfstate"
+    # resource_group_name  = "rg-tf-state"
+    # storage_account_name = "stterraformstatepwc"
+    # container_name       = "tfstate"
+    # key                  = "pwc-retail-dev.tfstate"
   }
 }
 
 provider "azurerm" {
   features {}
 
-  # optional if you use service principal vars / env vars
-  subscription_id = var.subscription_id
-  tenant_id       = var.tenant_id
-  client_id       = var.client_id
-  client_secret   = var.client_secret
+  # # optional if you use service principal vars / env vars
+  # subscription_id = var.subscription_id
+  # tenant_id       = var.tenant_id
+  # client_id       = var.client_id
+  # client_secret   = var.client_secret
 }
 
 provider "databricks" {
