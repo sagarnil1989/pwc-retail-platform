@@ -19,10 +19,15 @@ terraform {
   }
 
   backend "azurerm" {
-    # resource_group_name  = "rg-tf-state"
-    # storage_account_name = "stterraformstatepwc"
-    # container_name       = "tfstate"
-    # key                  = "pwc-retail-dev.tfstate"
+    resource_group_name  = "rg-tf-state"
+    storage_account_name = "stterraformstatepwc"
+    container_name       = "tfstate"
+    key                  = "pwc-retail-dev.tfstate"
+    use_oidc             = true
+    use_azuread_auth     = true
+    tenant_id            = "b82fab88-2f13-4992-a425-5bf3069f8df2"
+    subscription_id      = "82710df5-bd00-45bb-801d-537e387dface"
+    client_id            = "0a25767b-4e60-4b84-9864-c3c541887736"
   }
 }
 

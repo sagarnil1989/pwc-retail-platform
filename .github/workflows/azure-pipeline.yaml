@@ -58,16 +58,7 @@ jobs:
       - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          terraform init \
-            -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
-            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
-            -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
-            -backend-config="key=${{ vars.TFSTATE_KEY }}" \
-            -backend-config="use_oidc=true" \
-            -backend-config="use_azuread_auth=true" \
-            -backend-config="tenant_id=${{ vars.AZURE_TENANT_ID }}" \
-            -backend-config="subscription_id=${{ vars.AZURE_SUBSCRIPTION_ID }}" \
-            -backend-config="client_id=${{ vars.AZURE_CLIENT_ID }}"
+          terraform init 
 
       - name: Terraform Format Check
         working-directory: ${{ env.TF_WORKING_DIR }}
